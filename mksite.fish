@@ -7,7 +7,7 @@ function mksite --description 'De ultieme webproject builder gesynchroniseerd me
     echo ""
 
     # 1. PROJECTNAAM OPVRAGEN
-    read -l -p 'echo "Voer de projectnaam in (bijv. mijn-nieuwe-app): "' PROJECT_NAME
+    read -l -p 'echo "Voer de projectnaam in: "' PROJECT_NAME
     set PROJECT_NAME (string trim "$PROJECT_NAME")
     if test -z "$PROJECT_NAME"
         echo "[-] Fout: Projectnaam is verplicht."
