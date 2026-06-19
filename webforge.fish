@@ -1,4 +1,114 @@
-function mksite --description 'De ultieme webproject builder gesynchroniseerd met het start-script'
+function webforge --description 'WebForge CLI: Project builder en dev server launcher'
+    set ACTION $argv[1]
+
+    if test "$ACTION" = "create"
+        _webforge_create
+    else if test "$ACTION" = "start"
+        _webforge_start_menu
+    else
+        echo "========================================================================"
+        echo "                     🚀 WEBFORGE CLI [v1.0] "
+        echo "========================================================================"
+        echo "Gebruik:"
+        echo "  webforge create   - Bouw een nieuw project"
+        echo "  webforge start    - Start een bestaand project"
+        echo "========================================================================"
+    end
+end
+
+function _webforge_launch_server -a project_path
+    echo ""
+    echo "[+] Dev server starten voor "(basename $project_path)"..."
+
+    set LOG_FILE (mktemp)
+    
+    if command -v alacritty >/dev/null
+        nohup alacritty --working-directory $project_path -e fish -c "npm run dev | tee $LOG_FILE; or echo '[-] Server gestopt.'; read" >/dev/null 2>&1 &
+    else if command -v konsole >/dev/null
+        nohup konsole --workdir $project_path -e fish -c "npm run dev | tee $LOG_FILE; or echo '[-] Server gestopt.'; read" >/dev/null 2>&1 &
+    end
+
+    echo -n "[+] Wachten op server poort..."
+    set -l timeout 0
+    set -l gedetecteerde_url ""
+
+    while test $timeout -lt 50
+        echo -n "."
+        sleep 0.1
+        set timeout (math $timeout + 1)
+        set gedetecteerde_url (grep -oE "http://(localhost|127\.0\.0\.1|0\.0\.0\.0):[0-9]+" $LOG_FILE | head -n 1)
+        if test -n "$gedetecteerde_url"
+            break
+        end
+    end
+    echo ""
+
+    if test -n "$gedetecteerde_url"
+        set open_url (string replace -r "0\.0\.0\.0" "localhost" "$gedetecteerde_url")
+        echo "[+] Gevonden! Browser openen op $open_url..."
+        xdg-open "$open_url" >/dev/null 2>&1
+    else
+        echo "[-] Kon poort niet automatisch uitlezen uit terminal log. Probeer handmatig."
+        xdg-open "http://localhost:5173" >/dev/null 2>&1
+    end
+
+    rm -f $LOG_FILE
+end
+
+function _webforge_start_menu
+    set DEV_DIR "$HOME/Development"
+    set OUDE_MAP (pwd)
+
+    if not test -d $DEV_DIR
+        echo "[-] Fout: De map $DEV_DIR bestaat niet."
+        return 1
+    end
+
+    builtin cd $DEV_DIR
+    set projects *
+
+    if test (count $projects) -eq 0
+        echo "[-] Geen projecten gevonden in $DEV_DIR."
+        builtin cd $OUDE_MAP >/dev/null
+        return 1
+    end
+
+    echo "========================================================================"
+    echo "          🚀 KIES EEN PROJECT OM DE DEV SERVER TE STARTEN"
+    echo "========================================================================"
+    
+    set i 1
+    for project in $projects
+        if test -d $project
+            echo "  [$i] $project"
+            set i (math $i + 1)
+        end
+    end
+    echo "========================================================================"
+
+    echo -n "Typ het cijfer van je project (of 'q' om te stoppen): "
+    read -l keuze
+
+    if test "$keuze" = "q"
+        echo "[+] Geannuleerd."
+        builtin cd $OUDE_MAP >/dev/null
+        return 0
+    end
+
+    if string match -r '^[0-9]+$' -- "$keuze"; and test $keuze -ge 1; and test $keuze -lt $i
+        set gekozen_project $projects[$keuze]
+        set project_path "$DEV_DIR/$gekozen_project"
+        _webforge_launch_server $project_path
+        builtin cd $OUDE_MAP >/dev/null
+        echo "[+] Succes! Je huidige terminal is weer vrij."
+    else
+        echo "[-] Ongeldige keuze."
+        builtin cd $OUDE_MAP >/dev/null
+        return 1
+    end
+end
+
+function _webforge_create
     clear
     echo "========================================================================"
     echo "                     🚀 WEBFORGE CLI [v1.0] "
@@ -6,7 +116,6 @@ function mksite --description 'De ultieme webproject builder gesynchroniseerd me
     echo "========================================================================"
     echo ""
 
-    # 1. PROJECTNAAM OPVRAGEN
     read -l -p 'echo "Voer de projectnaam in: "' PROJECT_NAME
     set PROJECT_NAME (string trim "$PROJECT_NAME")
     if test -z "$PROJECT_NAME"
@@ -21,7 +130,6 @@ function mksite --description 'De ultieme webproject builder gesynchroniseerd me
         return 1
     end
 
-    # 2. INTERACTIEF MENU
     echo ""
     echo "Kies de gewenste structuur voor je nieuwe project:"
     echo "------------------------------------------------------------------------"
@@ -46,7 +154,6 @@ function mksite --description 'De ultieme webproject builder gesynchroniseerd me
     read -l -p 'echo "Kies een optie [1-4]: "' TEMPLATE_CHOICE
     set TEMPLATE_CHOICE (string trim "$TEMPLATE_CHOICE")
 
-    # HELPER FUNCTIES (Deze worden aan het eind weer opgeruimd)
     function _find_free_port -a START_PORT
         set -l PORT_NUM $START_PORT
         while ss -lnt | grep -q ":$PORT_NUM "
@@ -55,7 +162,6 @@ function mksite --description 'De ultieme webproject builder gesynchroniseerd me
         echo $PORT_NUM
     end
 
-    # Vrije poort zoeken vanaf 3000
     set PORT (_find_free_port 3000)
 
     echo ""
@@ -63,7 +169,6 @@ function mksite --description 'De ultieme webproject builder gesynchroniseerd me
     mkdir -p $TARGET_DIR
     builtin cd $TARGET_DIR
 
-    # 3. GEDEELDE CONFIGURATIES (Prettier)
     echo '{
   "semi": true,
   "singleQuote": true,
@@ -77,7 +182,6 @@ dist/
 .env
 *.sqlite" > .prettierignore
 
-    # INTERNE FUNCTIE VOOR PRO BACKEND
     function _build_backend -a PORT PROJECT_NAME
         mkdir -p config routes middleware data
         echo '{
@@ -98,7 +202,6 @@ dist/
   }
 }' > package.json
         
-        # Error handler
         echo "const errorHandler = (err, req, res, next) => {
   console.error(`[Error] \${err.stack}`);
   res.status(err.statusCode || 500).json({ 
@@ -109,7 +212,6 @@ dist/
 
 module.exports = errorHandler;" > middleware/errorHandler.js
         
-        # Database
         echo "const Database = require('better-sqlite3');
 const path = require('path');
 
@@ -118,7 +220,6 @@ db.exec('CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, 
 
 module.exports = db;" > config/database.js
         
-        # Routes
         echo "const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
@@ -140,7 +241,6 @@ router.get('/status', (req, res, next) => {
 
 module.exports = router;" > routes/api.js
         
-        # Index
         echo "require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -167,8 +267,37 @@ NODE_ENV=development" > .env
         npm install --silent
     end
 
-    # 4. TEMPLATE LOGICA
-    if string match -q "*2*" "$TEMPLATE_CHOICE"
+    if string match -q "*1*" "$TEMPLATE_CHOICE"
+        echo "[+] Vite Front-end template opbouwen..."
+        echo '{
+  "name": "'$PROJECT_NAME'",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port '$PORT' --host --clearScreen false",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "vite": "^5.2.11"
+  }
+}' > package.json
+        
+        echo "<!DOCTYPE html>
+<html>
+<body>
+  <div id=\"app\" style=\"text-align:center;margin-top:20%;\">
+    <h1>⚡ $PROJECT_NAME (Vite)</h1>
+  </div>
+  <script type=\"module\" src=\"/main.js\"></script>
+</body>
+</html>" > index.html
+        
+        echo "import './style.css';" > main.js
+        echo "body { background: #111827; color: white; font-family: sans-serif; }" > style.css
+        npm install --silent
+
+    else if string match -q "*2*" "$TEMPLATE_CHOICE"
         echo "[+] Productie-ready Express.js Monolith opbouwen..."
         mkdir -p public server
         builtin cd server
@@ -203,36 +332,6 @@ NODE_ENV=development" > .env
     "prettier": "^3.2.5"
   }
 }' > package.json
-        npm install --silent
-
-    else if string match -q "*1*" "$TEMPLATE_CHOICE"
-        echo "[+] Vite Front-end template opbouwen..."
-        echo '{
-  "name": "'$PROJECT_NAME'",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite --port '$PORT' --host --clearScreen false",
-    "format": "prettier --write ."
-  },
-  "devDependencies": {
-    "prettier": "^3.2.5",
-    "vite": "^5.2.11"
-  }
-}' > package.json
-        
-        echo "<!DOCTYPE html>
-<html>
-<body>
-  <div id=\"app\" style=\"text-align:center;margin-top:20%;\">
-    <h1>⚡ $PROJECT_NAME (Vite)</h1>
-  </div>
-  <script type=\"module\" src=\"/main.js\"></script>
-</body>
-</html>" > index.html
-        
-        echo "import './style.css';" > main.js
-        echo "body { background: #111827; color: white; font-family: sans-serif; }" > style.css
         npm install --silent
 
     else if string match -q "*3*" "$TEMPLATE_CHOICE"
@@ -397,16 +496,15 @@ export default App;" > src/App.jsx
         npm install --silent
     end
 
-    # 5. POETSEN & COMMITTEN
     echo "[+] Code formatteren..."
     npm run format --silent
+    
     echo "node_modules/
 .env
 .DS_Store
 dist/
 *.sqlite" > .gitignore
     
-    # Git init fixes (quiet i.p.v. silent)
     git init -b main --quiet
     git add .
     git commit -m "Initial commit" --quiet
@@ -421,12 +519,13 @@ dist/
     echo "🎉 PROJECT SUCCESVOL LIVE GEZET ALS NATIVE FISH APP!"
     echo "========================================================================"
     
-    # Check of code-alias of VS Code daadwerkelijk bestaat voor het openen
     if type -q code
         code . 2>/dev/null
     end
     
-    # Tijdelijke functies opruimen
     functions -e _build_backend
     functions -e _find_free_port
+
+    # --- AUTO START SERVER ---
+    _webforge_launch_server $TARGET_DIR
 end
